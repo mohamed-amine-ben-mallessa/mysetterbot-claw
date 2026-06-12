@@ -14,8 +14,13 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from . import guardrails as G
-from . import llm, prompts
+from . import llm, pipeline, prompts
 from .cli_bridge import CliError, CliResult, run_cli
+
+
+def _unwrap(r: CliResult) -> Any:
+    """Return CLI data on success, else None (for internal composition)."""
+    return r.data if r.ok else None
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -224,7 +229,191 @@ def t_qualify_lead(conversation: str, offer: str = "", **_) -> dict:
     return {"ok": True, "qualification": data}
 
 
+# ── C) ICP / intelligence (LLM, read-only) ──────────────────────────────────
+
+
+def t_extract_icp(username: str, posts_limit: int = 12, **_) -> dict:
+    """Analyze an Instagram account -> its Ideal Customer Profile + prospecting plan."""
+    info = _unwrap(run_cli(["user", "info", username]))
+    if not info:
+        return {"ok": False, "error": f"could not fetch profile for '{username}' "
+                "(private/blocked/typo, or session/rate issue)."}
+    posts = _unwrap(run_cli(["user", "posts", username, "--limit", str(posts_limit)])) or []
+    if isinstance(posts, dict):
+        posts = posts.get("items") or posts.get("posts") or []
+    try:
+        icp = llm.complete_json(prompts.ICP_SYSTEM, prompts.icp_user(info, posts))
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"ICP analysis failed: {e}"}
+    return {"ok": True, "account": username, "profile": {
+        "followers": info.get("followers_count"), "bio": info.get("biography"),
+    }, "icp": icp,
+        "note": "Use icp.prospecting.hashtags / search_queries with find_prospects."}
+
+
+def t_score_prospect(prospect: dict, icp: str, **_) -> dict:
+    try:
+        data = llm.complete_json(prompts.SCORE_SYSTEM, prompts.score_user(prospect or {}, icp))
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"scoring failed: {e}"}
+    return {"ok": True, "score": data}
+
+
+def t_find_prospects(hashtag: str = "", query: str = "", limit: int = 20,
+                     enrich: bool = True, **_) -> dict:
+    """Source candidate accounts from a hashtag and/or a user search, optionally enriched."""
+    found: dict[str, dict] = {}
+    if hashtag:
+        posts = _unwrap(run_cli(["hashtag", "recent", hashtag.lstrip("#"), "--limit", str(limit)])) or []
+        if isinstance(posts, dict):
+            posts = posts.get("items") or posts.get("posts") or []
+        for p in posts:
+            u = (p.get("user") or {})
+            un = u.get("username") or p.get("username")
+            if un and un not in found:
+                found[un] = {"username": un, "source": f"#{hashtag.lstrip('#')}",
+                             "full_name": u.get("full_name")}
+    if query:
+        users = _unwrap(run_cli(["user", "search", query])) or []
+        if isinstance(users, dict):
+            users = users.get("users") or users.get("items") or []
+        for u in users[:limit]:
+            un = u.get("username")
+            if un and un not in found:
+                found[un] = {"username": un, "source": f"search:{query}",
+                             "full_name": u.get("full_name")}
+    prospects = list(found.values())[:limit]
+    if enrich:
+        for pr in prospects:
+            info = _unwrap(run_cli(["user", "info", pr["username"]]))
+            if info:
+                pr.update({k: info.get(k) for k in
+                           ("biography", "followers_count", "following_count",
+                            "media_count", "is_verified") if info.get(k) is not None})
+    return {"ok": True, "count": len(prospects), "prospects": prospects}
+
+
+# ── D) Engagement warm-up (LLM draft + gated like/comment) ───────────────────
+
+
+def t_engagement_warmup(username: str, like: bool = True, comment: bool = True,
+                        offer: str = "", approve: bool = False, force: bool = False, **_) -> dict:
+    """
+    Warm up a prospect before any cold DM: like their latest post and/or drop a
+    genuine comment. DRY-RUN by default — returns the plan + drafted comment; with
+    approve=true it performs the gated actions (each counted against its quota).
+    """
+    posts = _unwrap(run_cli(["user", "posts", username, "--limit", "1"])) or []
+    if isinstance(posts, dict):
+        posts = posts.get("items") or posts.get("posts") or []
+    if not posts:
+        return {"ok": False, "error": f"no recent post found for '{username}'."}
+    post = posts[0]
+    media_id = str(post.get("id") or post.get("pk") or post.get("media_id") or "")
+    caption = post.get("caption") or post.get("text") or ""
+    info = _unwrap(run_cli(["user", "info", username])) or {"username": username}
+
+    plan: dict = {"username": username, "media_id": media_id, "actions": []}
+    comment_text = ""
+    if comment:
+        try:
+            comment_text = llm.complete(
+                prompts.WARMUP_COMMENT_SYSTEM, prompts.warmup_comment_user(info, caption))
+        except Exception as e:  # noqa: BLE001
+            comment_text = ""
+            plan["comment_error"] = str(e)
+    if like:
+        plan["actions"].append({"type": "like_post", "media_id": media_id})
+    if comment and comment_text:
+        plan["actions"].append({"type": "comments_add", "media_id": media_id, "text": comment_text})
+
+    if not approve:
+        return {"ok": True, "dry_run": True, "warmup": plan,
+                "note": "DRY-RUN. Review the like/comment, then call again with approve=true."}
+
+    # execute, each behind its own quota/pacing gate
+    results = []
+    if like and media_id:
+        g = _write_gate("like_post", True, force)
+        if g is not None:
+            results.append({"like": g})
+        else:
+            r = run_cli(["like", "post", media_id], enable_growth=True)
+            if r.ok:
+                G.consume("like_post")
+            results.append({"like": _result(r)})
+    if comment and comment_text and media_id:
+        g = _write_gate("comments_add", True, force)
+        if g is not None:
+            results.append({"comment": g})
+        else:
+            r = run_cli(["comments", "add", media_id, comment_text], enable_growth=True)
+            if r.ok:
+                G.consume("comments_add")
+            results.append({"comment": _result(r), "text": comment_text})
+    return {"ok": True, "warmup": plan, "results": results}
+
+
+# ── E) Pipeline board (persisted lead CRM) ───────────────────────────────────
+
+
+def t_pipeline_set(username: str, stage: str = "", note: str = "", temperature: str = "",
+                   need: str = "", thread_id: str = "", **_) -> dict:
+    return pipeline.upsert(username, stage=stage, note=note, temperature=temperature,
+                           need=need, thread_id=thread_id)
+
+
+def t_pipeline_get(username: str, **_) -> dict:
+    return pipeline.get(username)
+
+
+def t_pipeline_board(stage: str = "", temperature: str = "", **_) -> dict:
+    return pipeline.board(stage=stage, temperature=temperature)
+
+
+def t_pipeline_remove(username: str, **_) -> dict:
+    return pipeline.remove(username)
+
+
+# ── F) DM listen (new inbound since last check) ──────────────────────────────
+
+
+def t_dm_listen(limit: int = 20, **_) -> dict:
+    """Surface inbox threads that are unread / have new activity, for triage."""
+    r = run_cli(["dm", "inbox", "--limit", str(limit)])
+    if not r.ok:
+        return _result(r)
+    threads = r.data if isinstance(r.data, list) else (
+        (r.data or {}).get("threads") or (r.data or {}).get("items") or [])
+    new = []
+    for t in threads:
+        unread = t.get("unread") or t.get("has_newer") or t.get("unseen_count")
+        if unread:
+            new.append({
+                "thread_id": t.get("thread_id") or t.get("id"),
+                "title": t.get("title") or t.get("thread_title"),
+                "users": t.get("users"),
+                "last_activity": t.get("last_activity_at") or t.get("last_activity"),
+                "unread": unread,
+            })
+    return {"ok": True, "new_count": len(new), "new_threads": new,
+            "note": "Read one with dm_thread(thread_id); then qualify_lead + pipeline_set."}
+
+
 # ── meta tools ───────────────────────────────────────────────────────────────
+
+
+def t_daily_plan(target_dm: int = 0, **_) -> dict:
+    """Propose today's safe action budget given remaining quotas."""
+    rep = G.usage_report()["actions"]
+    plan = {a: rep[a]["remaining"] for a in rep}
+    suggestion = {
+        "warmups": min(plan.get("like_post", 0), plan.get("comments_add", 0), 10),
+        "openers (dm_send)": plan.get("dm_send", 0) if not target_dm else min(target_dm, plan.get("dm_send", 0)),
+        "follows": plan.get("follow", 0),
+    }
+    return {"ok": True, "remaining_today": plan, "suggested_today": suggestion,
+            "note": "These are CEILINGS. Stay well under them and act on a human cadence."}
 
 
 def t_usage(**_) -> dict:
@@ -307,6 +496,47 @@ _reg("draft_reply", t_draft_reply,
 _reg("qualify_lead", t_qualify_lead,
      "Classify a conversation (temperature/stage/need/next_action) as JSON (free LLM).",
      {"conversation": _S, "offer": _S}, ["conversation"])
+
+# ICP / intelligence (LLM, read-only)
+_reg("extract_icp", t_extract_icp,
+     "Analyze an Instagram account (yours or a competitor) -> Ideal Customer Profile + "
+     "prospecting plan (hashtags, lookalikes, search queries, opener angle). Free LLM.",
+     {"username": _S, "posts_limit": _I}, ["username"])
+_reg("score_prospect", t_score_prospect,
+     "Score a prospect's fit against an ICP (0-100 + best hook) to prioritize. Free LLM.",
+     {"prospect": _O, "icp": _S}, ["prospect", "icp"])
+_reg("find_prospects", t_find_prospects,
+     "Source candidate accounts from a hashtag and/or user search, optionally enriched "
+     "with profile data. Read-only.",
+     {"hashtag": _S, "query": _S, "limit": _I, "enrich": _B})
+
+# engagement warm-up (LLM draft + gated like/comment, dry-run default)
+_reg("engagement_warmup", t_engagement_warmup,
+     "Warm up a prospect before a cold DM: like + a genuine drafted comment on their "
+     "latest post. DRY-RUN unless approve=true (each action quota-gated).",
+     {"username": _S, "like": _B, "comment": _B, "offer": _S, **_GATE}, ["username"])
+
+# pipeline board (persisted lead CRM)
+_reg("pipeline_set", t_pipeline_set,
+     "Create/update a lead on the board (stage/temperature/need/note/thread_id). "
+     "Stages: sourced, contacted, no_reply, engaged, qualified, handoff, not_a_fit.",
+     {"username": _S, "stage": _S, "note": _S, "temperature": _S, "need": _S, "thread_id": _S},
+     ["username"])
+_reg("pipeline_get", t_pipeline_get, "Get one lead's full record + history.",
+     {"username": _S}, ["username"])
+_reg("pipeline_board", t_pipeline_board,
+     "List the lead board (optionally filtered by stage/temperature) + counts by stage.",
+     {"stage": _S, "temperature": _S})
+_reg("pipeline_remove", t_pipeline_remove, "Remove a lead from the board.",
+     {"username": _S}, ["username"])
+
+# dm listen + daily plan
+_reg("dm_listen", t_dm_listen,
+     "Surface unread/new inbound DM threads for triage (read-only).",
+     {"limit": _I})
+_reg("daily_plan", t_daily_plan,
+     "Propose today's safe action budget from remaining quotas (anti-ban planning).",
+     {"target_dm": _I})
 
 # meta
 _reg("usage", t_usage, "Show today's action usage vs daily quotas (anti-ban pacing).", {})

@@ -78,6 +78,85 @@ def qualify_user(conversation: str, offer: str = "") -> str:
     return f"CONVERSATION (oldest first):\n{conversation}{angle}\n\nClassify now. JSON only."
 
 
+# ── ICP extraction ────────────────────────────────────────────────────────────
+
+ICP_SYSTEM = (
+    "You are a B2B positioning analyst. From an Instagram account's profile and recent "
+    "posts, infer its Ideal Customer Profile (ICP) — i.e. WHO this account is best "
+    "positioned to reach and sell to, and how to talk to them. Output ONLY JSON:\n"
+    "{\n"
+    '  "account_summary": "<what this account does, 1 sentence>",\n'
+    '  "niche": "<primary niche/industry>",\n'
+    '  "icp": {\n'
+    '    "who": "<the ideal customer in one line>",\n'
+    '    "segments": ["<audience segment>", "..."],\n'
+    '    "pains": ["<pain this account solves>", "..."],\n'
+    '    "desires": ["<what they want>", "..."],\n'
+    '    "objections": ["<likely objection>", "..."]\n'
+    "  },\n"
+    '  "voice": {"tone": "<tone>", "language": "<fr/en/...>", "vocabulary": ["<word>", "..."]},\n'
+    '  "prospecting": {\n'
+    '    "hashtags": ["<hashtag to search, no #>", "..."],\n'
+    '    "lookalike_accounts": ["<type of account whose followers fit>", "..."],\n'
+    '    "search_queries": ["<user-search query>", "..."]\n'
+    "  },\n"
+    '  "opener_angle": "<the single best angle to open a cold DM with>"\n'
+    "}\n"
+    "Be concrete and specific to the evidence. No generic marketing fluff."
+)
+
+
+def icp_user(profile: dict, posts: list) -> str:
+    caps = []
+    for p in (posts or [])[:12]:
+        cap = (p.get("caption") or p.get("text") or "")[:280]
+        if cap:
+            caps.append(f"- {cap}")
+    posts_block = "\n".join(caps) or "(no captions available)"
+    return (
+        f"ACCOUNT PROFILE:\n{_fmt(profile)}\n\n"
+        f"RECENT POST CAPTIONS:\n{posts_block}\n\n"
+        "Infer the ICP now. JSON only."
+    )
+
+
+# ── prospect scoring ──────────────────────────────────────────────────────────
+
+SCORE_SYSTEM = (
+    "You score how well a prospect fits a given ICP, for prioritizing outreach. "
+    "Output ONLY JSON:\n"
+    '{ "score": 0-100, "fit": "high"|"medium"|"low", '
+    '"reasons": ["..."], "best_hook": "<the most specific thing to mention to them>" }\n'
+    "Score on evidence (bio, what they post, audience). Unknown ≠ good fit."
+)
+
+
+def score_user(prospect: dict, icp: str) -> str:
+    return (
+        f"ICP TO MATCH AGAINST:\n{icp}\n\n"
+        f"PROSPECT:\n{_fmt(prospect)}\n\n"
+        "Score the fit now. JSON only."
+    )
+
+
+# ── warm-up comment ───────────────────────────────────────────────────────────
+
+WARMUP_COMMENT_SYSTEM = _VOICE + (
+    " TASK: write a SHORT, genuine public comment on this person's post (this is a "
+    "warm-up before any DM, so it must look 100% like a real human who actually saw the "
+    "post). 3-12 words, specific to the post, zero sales, no links, no @mentions, "
+    "at most one emoji. If you can't be specific, return a simple genuine reaction."
+)
+
+
+def warmup_comment_user(prospect: dict, post_caption: str) -> str:
+    return (
+        f"AUTHOR:\n{_fmt(prospect)}\n\n"
+        f"THEIR POST CAPTION:\n{post_caption[:400]}\n\n"
+        "Write the comment now (text only)."
+    )
+
+
 def _fmt(prospect: dict) -> str:
     keep = ("username", "full_name", "biography", "followers_count",
             "following_count", "media_count", "is_verified", "category", "last_post")
