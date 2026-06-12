@@ -130,6 +130,20 @@ The guardrails are on by default; keep them on.
 
 Tune quotas with env vars, e.g. `MSBC_QUOTA_DM_SEND=15`.
 
+## Skill, scripts & docs
+
+```
+skills/instagram-setter/SKILL.md   portable agent skill (the safe setter loop)
+scripts/demo_setter.py             guided DRY-RUN-ONLY end-to-end walkthrough
+ref/TOOLS.md                       all 42 tools, args, returns, quotas
+ref/WORKFLOW.md                    the step-by-step setter workflow
+```
+
+```bash
+# read the whole loop without sending anything:
+python scripts/demo_setter.py <a_username> "<your one-line offer>"
+```
+
 ## Roadmap (ideas, not yet built)
 
 - `sequence_run` — actually *execute* a `sequence_plan` step-by-step (still gated)
