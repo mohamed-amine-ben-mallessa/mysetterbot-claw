@@ -7,7 +7,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/MCP-server-6E59F7" alt="MCP">
-  <img src="https://img.shields.io/badge/26-tools-1f9d55" alt="26 tools">
+  <img src="https://img.shields.io/badge/36-tools-1f9d55" alt="36 tools">
   <img src="https://img.shields.io/badge/LLM-OpenRouter%20free-orange" alt="Free LLM">
   <img src="https://img.shields.io/badge/dry--run-by%20default-E1306C" alt="Dry-run default">
   <img src="https://img.shields.io/badge/dependencies-0-brightgreen" alt="Zero deps">
@@ -42,19 +42,31 @@ copywriting, and safety.
 | Paid SaaS, closed | **MIT, zero deps**, runs anywhere an agent runs |
 | "Send" is the only verb | **Setter workflow**: source → personalize → reply → **qualify** |
 
-## The 26 tools
+## The 36 tools
 
 **🔎 Read / prospect** — `dm_inbox` · `dm_thread` · `dm_search` · `user_info` ·
 `user_search` · `user_posts` · `hashtag_recent` · `hashtag_top` · `comments_list` ·
 `followers_list` · `following_list` · `analytics_profile` · `analytics_post`
 
-**✍️ Setter (free LLM, never sends)** — `draft_opener` · `draft_followup` ·
+**🧠 Intelligence (free LLM, read-only)** — `extract_icp` (account → Ideal Customer
+Profile + prospecting plan) · `find_prospects` (source from hashtag/search, enriched) ·
+`score_prospect` (0-100 ICP-fit + best hook)
+
+**✍️ Setter copy (free LLM, never sends)** — `draft_opener` · `draft_followup` ·
 `draft_reply` · `qualify_lead`
+
+**🔥 Warm-up (gated, dry-run default)** — `engagement_warmup` (like + a genuine
+drafted comment on their latest post, *before* any cold DM)
 
 **✉️ Write / growth (gated, dry-run default)** — `dm_send` · `dm_send_media` ·
 `comments_add` · `comments_reply` · `follow` · `unfollow` · `like_post`
 
-**🛡️ Meta** — `usage` (quota report) · `doctor` (session health)
+**📋 Pipeline (persisted lead CRM)** — `pipeline_set` · `pipeline_get` ·
+`pipeline_board` · `pipeline_remove` (stages: sourced → contacted → no_reply →
+engaged → qualified → handoff → not_a_fit)
+
+**🛡️ Meta / triage** — `dm_listen` (new inbound) · `daily_plan` (safe budget from
+remaining quota) · `usage` (quota report) · `doctor` (session health)
 
 ## The loop (how an agent uses it)
 
@@ -115,13 +127,14 @@ The guardrails are on by default; keep them on.
 
 Tune quotas with env vars, e.g. `MSBC_QUOTA_DM_SEND=15`.
 
-## Brainstormed roadmap (endpoints we may add)
+## Roadmap (ideas, not yet built)
 
-- `score_prospect` — LLM ICP-fit score to prioritize a list
-- `daily_plan` — propose today's N actions *within* the remaining quota
-- `engagement_warmup` — like/genuine-comment before a cold DM (more human)
-- `pipeline_board` — persist lead state (no-reply / engaged / qualified / handoff)
-- `dm_listen` — surface new inbound for triage
+- `sequence_run` — a paced multi-step cadence (warm-up → opener → follow-ups) that
+  respects quotas and stops on reply
+- `csv_import` / `csv_export` — bulk-load a prospect list, export the pipeline
+- `story_react` — react to a prospect's story as a softer warm-up
+- `inbox_triage` — auto-qualify every unread thread and update the board
+- `best_time` — suggest send windows from your `analytics_profile`
 
 PRs / ideas welcome.
 
