@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Secrets — NEVER commit
+.env
+.env.*
+*.session
+*session*.json
+
+# Pacing state (local runtime)
+.mysetterbot-claw/
+pacing.json
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

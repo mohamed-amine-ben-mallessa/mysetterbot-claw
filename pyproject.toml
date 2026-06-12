@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mysetterbot-claw"
+version = "0.1.0"
+description = "MCP toolkit that turns Instagram actions into agent tools and writes openers/follow-ups with a free LLM cascade. Anti-ban guardrails, dry-run by default."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "MySetterBot Claw contributors" }]
+keywords = ["mcp", "instagram", "outreach", "setter", "agent", "openrouter", "dm", "automation"]
+# Zero hard runtime deps: stdio JSON-RPC + urllib stdlib. The Instagram *actions*
+# are delegated to the `mysetterbot-claw-cli` (a.k.a. clinstagram) binary.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/mohamed-amine-ben-mallessa/mysetterbot-claw"
+"CLI (action layer)" = "https://github.com/mohamed-amine-ben-mallessa/mysetterbot-claw-cli"
+
+[project.scripts]
+mysetterbot-claw = "mysetterbot_claw.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mysetterbot_claw"]

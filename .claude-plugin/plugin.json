@@ -1,0 +1,17 @@
+{
+  "name": "mysetterbot-claw",
+  "version": "0.1.0",
+  "description": "MCP toolkit for Instagram setting/outreach: 1:1 action tools + a free-LLM layer that writes openers, follow-ups and qualifies leads. Dry-run by default, anti-ban pacing.",
+  "author": "MySetterBot Claw contributors",
+  "license": "MIT",
+  "keywords": ["instagram", "outreach", "setter", "dm", "mcp", "openrouter", "lead-gen"],
+  "mcpServers": {
+    "mysetterbot-claw": {
+      "command": "python",
+      "args": ["-m", "mysetterbot_claw"],
+      "env": {
+        "OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"
+      }
+    }
+  }
+}
