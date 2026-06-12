@@ -7,7 +7,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/MCP-server-6E59F7" alt="MCP">
-  <img src="https://img.shields.io/badge/36-tools-1f9d55" alt="36 tools">
+  <img src="https://img.shields.io/badge/42-tools-1f9d55" alt="42 tools">
   <img src="https://img.shields.io/badge/LLM-OpenRouter%20free-orange" alt="Free LLM">
   <img src="https://img.shields.io/badge/dry--run-by%20default-E1306C" alt="Dry-run default">
   <img src="https://img.shields.io/badge/dependencies-0-brightgreen" alt="Zero deps">
@@ -42,7 +42,7 @@ copywriting, and safety.
 | Paid SaaS, closed | **MIT, zero deps**, runs anywhere an agent runs |
 | "Send" is the only verb | **Setter workflow**: source → personalize → reply → **qualify** |
 
-## The 36 tools
+## The 42 tools
 
 **🔎 Read / prospect** — `dm_inbox` · `dm_thread` · `dm_search` · `user_info` ·
 `user_search` · `user_posts` · `hashtag_recent` · `hashtag_top` · `comments_list` ·
@@ -62,11 +62,14 @@ drafted comment on their latest post, *before* any cold DM)
 `comments_add` · `comments_reply` · `follow` · `unfollow` · `like_post`
 
 **📋 Pipeline (persisted lead CRM)** — `pipeline_set` · `pipeline_get` ·
-`pipeline_board` · `pipeline_remove` (stages: sourced → contacted → no_reply →
-engaged → qualified → handoff → not_a_fit)
+`pipeline_board` · `pipeline_remove` · `csv_import` · `csv_export` (stages: sourced
+→ contacted → no_reply → engaged → qualified → handoff → not_a_fit)
 
-**🛡️ Meta / triage** — `dm_listen` (new inbound) · `daily_plan` (safe budget from
-remaining quota) · `usage` (quota report) · `doctor` (session health)
+**🔭 Triage & planning** — `inbox_triage` (qualify every unread → board) ·
+`prospect_brief` (one-shot profile + score + opener) · `sequence_plan` (paced
+cadence) · `dm_listen` (new inbound) · `daily_plan` (safe budget) · `best_time`
+
+**🛡️ Meta** — `usage` (quota report) · `doctor` (session health)
 
 ## The loop (how an agent uses it)
 
@@ -129,12 +132,10 @@ Tune quotas with env vars, e.g. `MSBC_QUOTA_DM_SEND=15`.
 
 ## Roadmap (ideas, not yet built)
 
-- `sequence_run` — a paced multi-step cadence (warm-up → opener → follow-ups) that
-  respects quotas and stops on reply
-- `csv_import` / `csv_export` — bulk-load a prospect list, export the pipeline
-- `story_react` — react to a prospect's story as a softer warm-up
-- `inbox_triage` — auto-qualify every unread thread and update the board
-- `best_time` — suggest send windows from your `analytics_profile`
+- `sequence_run` — actually *execute* a `sequence_plan` step-by-step (still gated)
+- `webhook_out` — POST board changes to n8n / a CRM
+- `dedupe` — merge/clean duplicate leads
+- `ab_openers` — generate N opener variants and track which gets replies
 
 PRs / ideas welcome.
 
