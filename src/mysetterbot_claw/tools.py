@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from . import guardrails as G
+from . import bulk, guardrails as G
 from . import llm, pipeline, prompts
 from .cli_bridge import CliError, CliResult, run_cli
 
@@ -400,6 +400,168 @@ def t_dm_listen(limit: int = 20, **_) -> dict:
             "note": "Read one with dm_thread(thread_id); then qualify_lead + pipeline_set."}
 
 
+# ── G) Bulk CSV ──────────────────────────────────────────────────────────────
+
+
+def t_csv_import(path: str, **_) -> dict:
+    return bulk.import_csv(path)
+
+
+def t_csv_export(path: str, stage: str = "", temperature: str = "", **_) -> dict:
+    return bulk.export_csv(path, stage=stage, temperature=temperature)
+
+
+# ── H) Inbox triage (read inbox -> qualify each -> update board) ──────────────
+
+
+def t_inbox_triage(limit: int = 10, offer: str = "", thread_limit: int = 15,
+                   update_board: bool = True, **_) -> dict:
+    """
+    For each unread/new thread: read it, qualify with the LLM, and (optionally)
+    upsert the lead onto the pipeline board. Read + LLM only — never sends.
+    """
+    r = run_cli(["dm", "inbox", "--limit", str(limit)])
+    if not r.ok:
+        return _result(r)
+    threads = r.data if isinstance(r.data, list) else (
+        (r.data or {}).get("threads") or (r.data or {}).get("items") or [])
+    triaged = []
+    for th in threads:
+        unread = th.get("unread") or th.get("unseen_count") or th.get("has_newer")
+        if not unread:
+            continue
+        tid = str(th.get("thread_id") or th.get("id") or "")
+        users = th.get("users") or []
+        username = ""
+        if isinstance(users, list) and users:
+            u0 = users[0]
+            username = (u0.get("username") if isinstance(u0, dict) else str(u0)) or ""
+        if not tid:
+            continue
+        msgs = _unwrap(run_cli(["dm", "thread", tid, "--limit", str(thread_limit)])) or []
+        convo = _convo_text(msgs)
+        try:
+            q = llm.complete_json(prompts.QUALIFY_SYSTEM, prompts.qualify_user(convo, offer))
+        except Exception as e:  # noqa: BLE001
+            q = {"error": str(e)}
+        entry = {"thread_id": tid, "username": username, "qualification": q}
+        triaged.append(entry)
+        if update_board and username and isinstance(q, dict) and not q.get("error"):
+            pipeline.upsert(
+                username,
+                stage=_stage_from_qual(q),
+                temperature=q.get("temperature", ""),
+                need=q.get("need") or "",
+                thread_id=tid,
+                note="auto-triaged",
+            )
+    return {"ok": True, "triaged_count": len(triaged), "triaged": triaged,
+            "note": "Board updated. Draft replies for the hot/warm ones with draft_reply."}
+
+
+def _convo_text(msgs) -> str:
+    lines = []
+    for m in (msgs or [])[-30:]:
+        who = m.get("user_id") or m.get("username") or m.get("sender") or "?"
+        txt = (m.get("text") or m.get("item_type") or "").strip()
+        if txt:
+            lines.append(f"{who}: {txt}")
+    return "\n".join(lines) or "(no text messages)"
+
+
+def _stage_from_qual(q: dict) -> str:
+    stage = q.get("stage", "")
+    mapping = {
+        "no_reply": "contacted", "engaged": "engaged",
+        "needs_identified": "qualified", "ready_for_closer": "handoff",
+        "not_a_fit": "not_a_fit",
+    }
+    return mapping.get(stage, "engaged")
+
+
+# ── I) Prospect brief (one-shot: profile + last post + opener) ───────────────
+
+
+def t_prospect_brief(username: str, offer: str = "", icp: str = "", **_) -> dict:
+    """One call: enrich a prospect, optionally score vs ICP, and draft an opener."""
+    info = _unwrap(run_cli(["user", "info", username]))
+    if not info:
+        return {"ok": False, "error": f"could not fetch '{username}'."}
+    posts = _unwrap(run_cli(["user", "posts", username, "--limit", "1"])) or []
+    if isinstance(posts, dict):
+        posts = posts.get("items") or posts.get("posts") or []
+    last_caption = (posts[0].get("caption") or posts[0].get("text") or "") if posts else ""
+    prospect = {**info, "last_post": last_caption}
+    brief: dict = {"ok": True, "username": username, "profile": {
+        "full_name": info.get("full_name"), "bio": info.get("biography"),
+        "followers": info.get("followers_count"), "verified": info.get("is_verified"),
+    }, "last_post": last_caption[:280]}
+    if icp:
+        try:
+            brief["score"] = llm.complete_json(prompts.SCORE_SYSTEM, prompts.score_user(prospect, icp))
+        except Exception:  # noqa: BLE001
+            pass
+    if offer:
+        try:
+            brief["suggested_opener"] = llm.complete(
+                prompts.OPENER_SYSTEM, prompts.opener_user(prospect, offer))
+        except Exception:  # noqa: BLE001
+            pass
+    brief["note"] = "Review the opener, then dm_send(username, opener, approve=true)."
+    return brief
+
+
+# ── J) Best time (from your profile analytics) ───────────────────────────────
+
+
+def t_best_time(**_) -> dict:
+    """Suggest send windows. Uses profile analytics if available, else sane defaults."""
+    a = _unwrap(run_cli(["analytics", "profile"]))
+    note = ("Heuristic defaults — Instagram's private API rarely exposes per-hour "
+            "audience activity. Treat as a starting point, then learn from replies.")
+    windows = [
+        {"day": "Tue-Thu", "local_time": "12:00-13:00", "why": "lunch scroll"},
+        {"day": "Tue-Thu", "local_time": "19:00-21:00", "why": "evening peak"},
+        {"day": "Sun", "local_time": "10:00-12:00", "why": "weekend morning"},
+    ]
+    return {"ok": True, "suggested_windows": windows,
+            "analytics_available": bool(a), "note": note}
+
+
+# ── K) Sequence planning (paced multi-step cadence, dry-run only) ─────────────
+
+DEFAULT_SEQUENCE = [
+    {"step": 1, "day_offset": 0, "action": "engagement_warmup", "desc": "like + genuine comment"},
+    {"step": 2, "day_offset": 1, "action": "dm_send", "desc": "personalized opener"},
+    {"step": 3, "day_offset": 3, "action": "dm_send", "desc": "follow-up #1 (new angle)"},
+    {"step": 4, "day_offset": 7, "action": "dm_send", "desc": "follow-up #2 (last, low-pressure)"},
+]
+
+
+def t_sequence_plan(usernames: list, offer: str = "", **_) -> dict:
+    """
+    Build a paced outreach cadence for a list of prospects. This is a PLAN ONLY —
+    it never sends and never schedules; it tells the agent/human what to do when,
+    and registers the prospects on the board as 'sourced'. Stop the sequence on reply.
+    """
+    usernames = [u.lstrip("@").strip() for u in (usernames or []) if u and str(u).strip()]
+    if not usernames:
+        return {"ok": False, "error": "provide a non-empty 'usernames' list"}
+    for u in usernames:
+        pipeline.upsert(u, stage="sourced", note="added to sequence")
+    return {
+        "ok": True, "prospects": len(usernames), "offer": offer,
+        "cadence": DEFAULT_SEQUENCE,
+        "rules": [
+            "STOP the sequence for a prospect as soon as they reply.",
+            "Each send is still dry-run by default — show the human, then approve=true.",
+            "Respect daily quotas; spread sends across days, never blast.",
+        ],
+        "note": "Plan only — execute steps manually/agentically using the per-step tools. "
+                "Prospects added to the board as 'sourced'.",
+    }
+
+
 # ── meta tools ───────────────────────────────────────────────────────────────
 
 
@@ -537,6 +699,32 @@ _reg("dm_listen", t_dm_listen,
 _reg("daily_plan", t_daily_plan,
      "Propose today's safe action budget from remaining quotas (anti-ban planning).",
      {"target_dm": _I})
+
+# bulk csv
+_reg("csv_import", t_csv_import,
+     "Import prospects from a CSV (needs a 'username' column; optional stage/temperature/"
+     "need/note/thread_id) into the pipeline board.",
+     {"path": _S}, ["path"])
+_reg("csv_export", t_csv_export,
+     "Export the pipeline board to a CSV file (optional stage/temperature filter).",
+     {"path": _S, "stage": _S, "temperature": _S}, ["path"])
+
+# inbox triage + prospect brief + best time + sequence
+_reg("inbox_triage", t_inbox_triage,
+     "Read every unread thread, qualify each with the LLM, and update the board. "
+     "Read + LLM only, never sends.",
+     {"limit": _I, "offer": _S, "thread_limit": _I, "update_board": _B})
+_reg("prospect_brief", t_prospect_brief,
+     "One-shot prospect brief: profile + last post + (optional) ICP score + a drafted "
+     "opener. Read + LLM only.",
+     {"username": _S, "offer": _S, "icp": _S}, ["username"])
+_reg("best_time", t_best_time,
+     "Suggest send-time windows (from profile analytics if available, else heuristics).",
+     {})
+_reg("sequence_plan", t_sequence_plan,
+     "Build a paced multi-step outreach cadence (warm-up -> opener -> follow-ups) for a "
+     "list of prospects. PLAN ONLY — never sends; adds them to the board as 'sourced'.",
+     {"usernames": {"type": "array", "items": _S}, "offer": _S}, ["usernames"])
 
 # meta
 _reg("usage", t_usage, "Show today's action usage vs daily quotas (anti-ban pacing).", {})
