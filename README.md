@@ -1,8 +1,8 @@
 <h1 align="center">🦅 MySetterBot Claw</h1>
 
 <p align="center">
-  <b>An MCP that turns Instagram into an outreach surface your agent can actually run —<br>
-  it writes the openers, you approve, it sends. Safely.</b>
+  <b>Instagram outreach your agent can actually run — it writes the opener, you approve, it sends.</b><br>
+  42 MCP tools, a free LLM that personalizes every message, and anti-ban guardrails that are <i>on by default</i>.
 </p>
 
 <p align="center">
@@ -14,25 +14,37 @@
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="MIT">
 </p>
 
+**Claude Code:**
+
+```
+/plugin marketplace add mohamed-amine-ben-mallessa/mysetterbot-claw
+/plugin install mysetterbot-claw
+```
+
+**Codex, Cursor, Copilot, Gemini CLI, or any of 50+ [Agent Skills](https://agentskills.io) hosts:**
+
+```
+npx skills add mohamed-amine-ben-mallessa/mysetterbot-claw -g
+```
+
+Full setup — including the CLI action layer and the keychain login — in [Install](#install).
+
 ---
 
-> **A "setter" opens conversations and qualifies leads — it doesn't pitch or close.**
+> **A "setter" opens conversations and qualifies leads — it doesn't pitch and it doesn't close.**
 > This MCP gives your agent a setter's toolkit: find prospects, write a genuinely
 > personalized opener with a **free** LLM, read the reply, qualify it — and never
 > send a thing until a human says go.
 
-## The two halves
+## Why this exists
 
-| | Repo | Role |
-|---|---|---|
-| 🦅 | **mysetterbot-claw** (this) | MCP server: 26 agent tools + free-LLM copywriting + anti-ban guardrails |
-| ⚙️ | [mysetterbot-claw-cli](https://github.com/mohamed-amine-ben-mallessa/mysetterbot-claw-cli) | The action layer: a JSON-clean Instagram CLI that owns the keychain session |
+Instagram "automation" comes in two flavors, and both are bad: brittle browser macros that
+break weekly, or paid SaaS that blasts the same template at 500 people until the account
+gets banned.
 
-The MCP **never touches credentials** — every action is delegated to the CLI,
-which keeps the session in your OS keychain. The MCP's job is orchestration,
-copywriting, and safety.
-
-## What makes it different
+The interesting job isn't *sending*. It's **reading a stranger's profile and writing one
+message worth replying to** — and that's exactly what an LLM is good at. So: the model
+writes, the guardrails pace, and a human presses send.
 
 | Typical IG automation | **MySetterBot Claw** |
 |---|---|
@@ -41,6 +53,32 @@ copywriting, and safety.
 | No rate awareness | **Daily quotas + pacing** baked in (per-action, with cooldowns) |
 | Paid SaaS, closed | **MIT, zero deps**, runs anywhere an agent runs |
 | "Send" is the only verb | **Setter workflow**: source → personalize → reply → **qualify** |
+
+## The two halves
+
+| | Repo | Role |
+|---|---|---|
+| 🦅 | **mysetterbot-claw** (this) | MCP server: 42 agent tools + free-LLM copywriting + anti-ban guardrails |
+| ⚙️ | [mysetterbot-claw-cli](https://github.com/mohamed-amine-ben-mallessa/mysetterbot-claw-cli) | The action layer: a JSON-clean Instagram CLI that owns the keychain session |
+
+The MCP **never touches credentials** — every action is delegated to the CLI, which keeps
+the session in your OS keychain. The MCP's job is orchestration, copywriting, and safety.
+
+## The loop (how an agent uses it)
+
+```text
+1. hashtag_recent("frenchstartup")        →  candidate posts/users
+2. user_info("@prospect") + user_posts    →  context
+3. draft_opener(prospect, offer)           →  a personalized first message  ✍️ (free LLM)
+4. dm_send(user, message)                  →  DRY-RUN: returns the preview   🛡️
+5. dm_send(user, message, approve=true)    →  actually sends (quota-checked) ✅
+6. ...they reply...
+7. dm_thread(thread_id)                     →  read it (handles voice/media safely)
+8. qualify_lead(conversation)               →  {temperature, stage, need, next_action}
+9. draft_reply(...) → dm_send(approve=true) →  keep it moving
+```
+
+The LLM only ever **writes text**. The decision to send is the human's.
 
 ## The 42 tools
 
@@ -71,29 +109,21 @@ cadence) · `dm_listen` (new inbound) · `daily_plan` (safe budget) · `best_tim
 
 **🛡️ Meta** — `usage` (quota report) · `doctor` (session health)
 
-## The loop (how an agent uses it)
-
-```text
-1. hashtag_recent("frenchstartup")        →  candidate posts/users
-2. user_info("@prospect") + user_posts    →  context
-3. draft_opener(prospect, offer)           →  a personalized first message  ✍️ (free LLM)
-4. dm_send(user, message)                  →  DRY-RUN: returns the preview   🛡️
-5. dm_send(user, message, approve=true)    →  actually sends (quota-checked) ✅
-6. ...they reply...
-7. dm_thread(thread_id)                     →  read it (handles voice/media safely)
-8. qualify_lead(conversation)               →  {temperature, stage, need, next_action}
-9. draft_reply(...) → dm_send(approve=true) →  keep it moving
-```
-
-The LLM only ever **writes text**. The decision to send is the human's.
+Every tool, argument, return shape and quota: [`ref/TOOLS.md`](ref/TOOLS.md).
 
 ## Install
 
+| Surface | Install | Updates |
+|---|---|---|
+| **Claude Code** (recommended) | `/plugin marketplace add mohamed-amine-ben-mallessa/mysetterbot-claw` then `/plugin install mysetterbot-claw` | `claude plugin update mysetterbot-claw` |
+| **Codex, Cursor, Copilot, Gemini CLI, or any of 50+ [Agent Skills](https://agentskills.io) hosts** | `npx skills add mohamed-amine-ben-mallessa/mysetterbot-claw -g` | `npx skills update instagram-setter -g` |
+| **Any MCP client** | `pip install -e .` + the JSON config below | `git pull` |
+
+Then, once, the action layer and the login:
+
 ```bash
-pip install -e .                       # the MCP
-pip install -e ../mysetterbot-claw-cli # the CLI action layer (or: pip install clinstagram)
-# the CLI logs you in once; session lives in your OS keychain:
-msbc auth login --username <you>
+pip install -e ../mysetterbot-claw-cli   # or: pip install clinstagram
+msbc auth login --username <you>          # session goes to your OS keychain, never a file
 ```
 
 ### Wire it into an MCP client
@@ -111,7 +141,8 @@ msbc auth login --username <you>
 ```
 
 `OPENROUTER_API_KEY` powers the free-model cascade (Llama 3.3 70B → Qwen3 → Gemma →
-gpt-oss → Nemotron → Hermes). Override the list with `MSBC_MODELS`.
+gpt-oss → Nemotron → Hermes). Override the list with `MSBC_MODELS`. **The copywriting
+costs nothing.**
 
 ## 🛡️ Safety model (read this)
 
@@ -130,6 +161,17 @@ The guardrails are on by default; keep them on.
 
 Tune quotas with env vars, e.g. `MSBC_QUOTA_DM_SEND=15`.
 
+Use this within Instagram's terms of service, and within the law that applies to you
+(GDPR, CAN-SPAM and friends cover unsolicited commercial messaging).
+
+## Try it without sending anything
+
+```bash
+python scripts/demo_setter.py <a_username> "<your one-line offer>"
+```
+
+A guided, **dry-run-only** walkthrough of the whole loop. Nothing leaves your machine.
+
 ## Skill, scripts & docs
 
 ```
@@ -139,11 +181,6 @@ ref/TOOLS.md                       all 42 tools, args, returns, quotas
 ref/WORKFLOW.md                    the step-by-step setter workflow
 ```
 
-```bash
-# read the whole loop without sending anything:
-python scripts/demo_setter.py <a_username> "<your one-line offer>"
-```
-
 ## Roadmap (ideas, not yet built)
 
 - `sequence_run` — actually *execute* a `sequence_plan` step-by-step (still gated)
@@ -151,14 +188,19 @@ python scripts/demo_setter.py <a_username> "<your one-line offer>"
 - `dedupe` — merge/clean duplicate leads
 - `ab_openers` — generate N opener variants and track which gets replies
 
-PRs / ideas welcome.
+PRs and ideas welcome.
 
 ## Credits
 
 Action layer forked from **[clinstagram](https://github.com/199-biotechnologies/clinstagram)**
 (MIT). Not affiliated with Instagram / Meta. "Instagram" is a trademark of its owner.
-Use responsibly and within Instagram's terms.
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+<p align="center">
+  <sub>Built by <a href="https://github.com/mohamed-amine-ben-mallessa">Mohamed Amine Ben Mallessa</a> · ⭐ star it if it got you a reply instead of a ban</sub>
+</p>
